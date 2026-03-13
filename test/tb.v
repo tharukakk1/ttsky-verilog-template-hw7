@@ -17,6 +17,9 @@ module tb ();
   wire [7:0] uio_out;
   wire [7:0] uio_oe;
 
+  // Error counter for cocotb to read
+  integer error_count;
+
 `ifdef GL_TEST
   wire VPWR = 1'b1;
   wire VGND = 1'b0;
@@ -37,14 +40,11 @@ module tb ();
       .rst_n  (rst_n)
   );
 
-  // Clock generation: 10ns period
   initial clk = 0;
   always #5 clk = ~clk;
 
-  // Convenience wire: q_o is bit 0 of uo_out
   wire q_o = uo_out[0];
 
-  // Helper task: wait for a falling clock edge
   task wait_negedge;
     @(negedge clk);
   endtask
@@ -52,13 +52,13 @@ module tb ();
   reg q_before, q_after, q_middle, q_bert;
 
   initial begin
-    // Initialize
+    error_count = 0;
     ena    = 1;
     uio_in = 8'b0;
     ui_in  = 8'b0;
-    rst_n  = 1;  // not in reset
+    rst_n  = 1;
 
-    // Apply reset (active-low: pull rst_n low)
+    // Apply reset
     wait_negedge;
     rst_n = 0;
     wait_negedge;
@@ -67,19 +67,19 @@ module tb ();
     rst_n = 1;
 
     // --- Reset test ---
-    ui_in[0] = 0; // d_i
-    ui_in[1] = 0; // en_i
+    ui_in[0] = 0;
+    ui_in[1] = 0;
     wait_negedge;
     if (q_o == 0)
       $display("PASS: reset test. q_o=%0b", q_o);
     else begin
       $display("FAIL: reset test. q_o=%0b", q_o);
-      $finish;
+      error_count = error_count + 1;
     end
 
     // --- Enable=0 test ---
-    ui_in[1] = 0; // en_i = 0
-    ui_in[0] = 1; // d_i = 1 (should be ignored)
+    ui_in[1] = 0;
+    ui_in[0] = 1;
     wait_negedge;
     q_before = q_o;
     wait_negedge;
@@ -88,28 +88,27 @@ module tb ();
       $display("PASS: enable=0 test. q_o=%0b", q_o);
     else begin
       $display("FAIL: enable=0 test. q_before=%0b q_after=%0b", q_before, q_after);
-      $finish;
+      error_count = error_count + 1;
     end
 
     // --- Enable=1 test ---
-    ui_in[1] = 1; // en_i = 1
-    ui_in[0] = 1; // d_i = 1
+    ui_in[1] = 1;
+    ui_in[0] = 1;
     wait_negedge;
-    q_before = q_o;  // expect 1
+    q_before = q_o;
 
-    ui_in[0] = 0;    // d_i = 0
+    ui_in[0] = 0;
     wait_negedge;
-    q_middle = q_o;  // expect 0
+    q_middle = q_o;
 
-    ui_in[0] = 1;    // d_i = 1
+    ui_in[0] = 1;
     wait_negedge;
-    q_after = q_o;   // expect 1
+    q_after = q_o;
 
-    // Test that reset overrides enable
     wait_negedge;
-    rst_n = 0;       // assert reset
+    rst_n = 0;
     #1;
-    q_bert = q_o;    // expect 1 (reset is synchronous, not yet clocked)
+    q_bert = q_o;
     wait_negedge;
 
     if ((q_before === 1'b1) & (q_middle === 1'b0) & (q_after === 1'b1) & (q_bert === 1'b1))
@@ -118,11 +117,11 @@ module tb ();
     else begin
       $display("FAIL: enable=1 test. q_before=%0b q_middle=%0b q_after=%0b q_bert=%0b",
                q_before, q_middle, q_after, q_bert);
-      $finish;
+      error_count = error_count + 1;
     end
 
-    $display("All tests passed!");
-    $finish;
+    $display("Tests complete. Total errors: %0d", error_count);
+    // Do NOT call $finish here — let cocotb's Timer control when simulation ends
   end
 
 endmodule
